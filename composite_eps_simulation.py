@@ -6,6 +6,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 from fenics import *
 
+# ---------- 图像配置：全局字体放大 ----------
+plt.rcParams.update({
+    "font.size": 20,
+    "axes.labelsize": 14,
+    "xtick.labelsize": 14,
+    "ytick.labelsize": 14,
+    "axes.titlesize": 18,
+    "legend.fontsize": 16,
+})
+
 def setup_logging(job_dir):
     log_file = os.path.join(job_dir, "simulation.log")
     logging.basicConfig(
@@ -100,24 +110,19 @@ def run_simulation_periodic(size, L_cond, L_temp, alpha, baseline, logger,
     noise = np.random.normal(0, 1, (size, size))
     F_white = np.fft.fftn(noise)
     dx_local = L_cond / size
-
     field_no_shift, _ = generate_field_regularized(
         F_white, dx_local, alpha, sigma, k0, C=1.0, target_std=target_std
     )
     field_positive = field_no_shift * 10 + baseline
-
     mesh, V = create_periodic_mesh_and_space(size, L_temp)
     V0 = FunctionSpace(mesh, 'DG', 0)
     k_fenics = interpolate_conductivity_to_fenics(field_positive, V0, size, L_cond, L_temp)
-
     Gx_val, Gy_val = macro_gradient
     G_const = Constant((Gx_val, Gy_val))
     a, L_form = define_variational_problem_periodic(V, k_fenics, G_const)
     T_p = solve_problem_periodic(V, a, L_form)
-
     T_data_p = T_p.vector().get_local()
     dof_coords = V.tabulate_dof_coordinates().reshape(-1, 2)
-
     T_array_p = np.zeros((size, size), dtype=np.float64)
     step = L_temp / size
     for i, (xx, yy) in enumerate(dof_coords):
@@ -126,27 +131,21 @@ def run_simulation_periodic(size, L_cond, L_temp, alpha, baseline, logger,
         col = min(col, size - 1)
         row = min(row, size - 1)
         T_array_p[row, col] = T_data_p[i]
-
     return T_array_p
 
 def main():
     logger = setup_logging(os.getcwd())
-
     L_cond = 50.0
     L_temp = 1.0
     size = 512
     offset = 0.0
     macro_gradient = (1.0, 0.0)
     alpha = 20
-
-    # (baseline, eps_label) pairs
     baseline_eps_pairs = [
         (50, r"$\varepsilon = 0.2$"),
         (500, r"$\varepsilon = 0.02$"),
         (5000, r"$\varepsilon = 0.002$"),
     ]
-
-    # Precompute power spectrum range for color normalization
     spectral_data = []
     for baseline, _ in baseline_eps_pairs:
         T_p = run_simulation_periodic(
@@ -158,17 +157,9 @@ def main():
         spectral_data.append(log_ps)
     global_vmin = min(np.min(ps) for ps in spectral_data)
     global_vmax = max(np.max(ps) for ps in spectral_data)
-
-    # We use 4 columns: 
-    #   col 0 -> vertical epsilon label
-    #   col 1 -> T_p
-    #   col 2 -> Binary
-    #   col 3 -> Power spectrum
-    #  rows = len(baseline_eps_pairs)
     n_rows = len(baseline_eps_pairs)
-    n_cols = 4
-
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(12, 9), constrained_layout=True)
+    n_cols = 3
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(11, 8), constrained_layout=True)
 
     for row_idx, (baseline, eps_label) in enumerate(baseline_eps_pairs):
         T_p = run_simulation_periodic(
@@ -176,36 +167,35 @@ def main():
             sigma=2.0, k0=0.1, target_std=1.0,
             macro_gradient=macro_gradient, offset=offset
         )
-        # =========== Column 0: Just for vertical label ============
-        axes[row_idx, 0].text(0.5, 0.5, eps_label,
-                              fontsize=14, rotation='vertical',
-                              va='center', ha='center')
-        axes[row_idx, 0].axis('off')  # Hide axis lines
-
-        # =========== Column 1: T_p field ============
-        ax_tp = axes[row_idx, 1]
+        ax_tp = axes[row_idx, 0]
         im_tp = ax_tp.imshow(T_p, origin='lower', cmap='jet', extent=[0, 1, 0, 1])
         ax_tp.set_xlabel("x")
         ax_tp.set_ylabel("y")
-        fig.colorbar(im_tp, ax=ax_tp, fraction=0.046, pad=0.04)
+        cb = fig.colorbar(im_tp, ax=ax_tp, fraction=0.046, pad=0.04)
+        cb.ax.tick_params(labelsize=10)
+        ax_tp.tick_params(labelsize=10)
+        ax_tp.text(-0.35, 0.5, eps_label, fontsize=14, rotation='vertical',
+                   transform=ax_tp.transAxes, va='center', ha='center')
 
-        # =========== Column 2: Binary field ============
         T_mean = np.mean(T_p)
         binary = (T_p - T_mean > 0).astype(float)
-        ax_bin = axes[row_idx, 2]
+        ax_bin = axes[row_idx, 1]
         im_bin = ax_bin.imshow(binary, origin='lower', cmap='gray', extent=[0, 1, 0, 1])
         ax_bin.set_xlabel("x")
         ax_bin.set_ylabel("y")
-        fig.colorbar(im_bin, ax=ax_bin, fraction=0.046, pad=0.04)
+        cb = fig.colorbar(im_bin, ax=ax_bin, fraction=0.046, pad=0.04)
+        cb.ax.tick_params(labelsize=10)
+        ax_bin.tick_params(labelsize=10)
 
-        # =========== Column 3: Power spectrum ============
         log_ps = np.log10(compute_power_spectrum_2d(T_p) + 1e-12)
-        ax_ps = axes[row_idx, 3]
+        ax_ps = axes[row_idx, 2]
         im_ps = ax_ps.imshow(log_ps, origin='lower', cmap='jet',
                              vmin=global_vmin, vmax=global_vmax)
         ax_ps.set_xlabel(r"$k_x$")
         ax_ps.set_ylabel(r"$k_y$")
-        fig.colorbar(im_ps, ax=ax_ps, fraction=0.046, pad=0.04)
+        cb = fig.colorbar(im_ps, ax=ax_ps, fraction=0.046, pad=0.04)
+        cb.ax.tick_params(labelsize=10)
+        ax_ps.tick_params(labelsize=10)
 
     out_file = f"composite_eps_vertical_alpha{alpha}.png"
     plt.savefig(out_file, dpi=150, bbox_inches='tight')

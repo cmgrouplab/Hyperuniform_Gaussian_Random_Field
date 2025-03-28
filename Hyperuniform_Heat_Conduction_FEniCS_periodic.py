@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 import os
 import sys
@@ -6,9 +7,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 from fenics import *
 
-# -----------------------------
-# 1) Setup Logging
-# -----------------------------
+# ---------- 图像配置：全局字体变大 ----------
+plt.rcParams.update({
+    "font.size": 18,
+    "axes.labelsize": 14,
+    "xtick.labelsize": 14,
+    "ytick.labelsize": 14,
+    "axes.titlesize": 18,
+    "legend.fontsize": 16,
+})
+
 def setup_logging(job_dir):
     log_file = os.path.join(job_dir, "simulation.log")
     logging.basicConfig(
@@ -20,9 +28,6 @@ def setup_logging(job_dir):
         ])
     return logging.getLogger()
 
-# -----------------------------
-# 2) Periodic Boundary Class
-# -----------------------------
 class PeriodicBoundary(SubDomain):
     def __init__(self, L_temp, tol=1e-10):
         super().__init__()
@@ -43,14 +48,10 @@ class PeriodicBoundary(SubDomain):
         if near(x[1], self.L_temp, self.tol):
             y[1] = x[1] - self.L_temp
 
-# -----------------------------
-# 3) Random Field Generation
-# -----------------------------
-def generate_field_regularized(F_white, dx, alpha, sigma=2.0, k0=0.1,
-                               C=1.0, target_std=1.0):
+def generate_field_regularized(F_white, dx, alpha, sigma=2.0, k0=0.1, C=1.0, target_std=1.0):
     N = F_white.shape[0]
-    kx = np.fft.fftfreq(N, d=dx)*2*np.pi
-    ky = np.fft.fftfreq(N, d=dx)*2*np.pi
+    kx = np.fft.fftfreq(N, d=dx) * 2*np.pi
+    ky = np.fft.fftfreq(N, d=dx) * 2*np.pi
     KX, KY = np.meshgrid(kx, ky, indexing='ij')
     K = np.sqrt(KX**2 + KY**2)
     exponent = alpha * np.log(K + k0) - (K**2)/(2*sigma**2)
@@ -72,9 +73,6 @@ def compute_power_spectrum_2d(field2d):
     PS = np.abs(F)**2
     return np.fft.fftshift(PS)
 
-# -----------------------------
-# 4) FEniCS Field Preparation & Solver
-# -----------------------------
 def interpolate_conductivity_to_fenics(k_field, V0, size, L_cond, L_temp):
     k_fenics = Function(V0)
     dof_coords = V0.tabulate_dof_coordinates().reshape(-1, 2)
@@ -105,9 +103,6 @@ def create_periodic_mesh_and_space(size, L_temp):
     V = FunctionSpace(mesh, 'P', 1, constrained_domain=pbc)
     return mesh, V
 
-# -----------------------------
-# 5) Run One Simulation
-# -----------------------------
 def run_simulation_periodic(size, L_cond, L_temp, alpha, logger,
                             sigma=2.0, k0=0.1, target_std=1.0,
                             macro_gradient=(1.0, 0.0), offset=0.0):
@@ -136,25 +131,19 @@ def run_simulation_periodic(size, L_cond, L_temp, alpha, logger,
     T_full = Function(V)
     T_full.vector()[:] = T_macro.vector() + T_p.vector()
 
-    # Convert solutions to numpy arrays
     T_data_full = T_full.vector().get_local()
     T_data_p = T_p.vector().get_local()
     dof_coords = V.tabulate_dof_coordinates().reshape(-1, 2)
-    T_array_full = np.zeros((size, size), dtype=np.float64)
-    T_array_p = np.zeros((size, size), dtype=np.float64)
+    T_array_full = np.zeros((size, size))
+    T_array_p = np.zeros((size, size))
     step = L_temp / size
     for i, (xx, yy) in enumerate(dof_coords):
-        col = int(round(xx / step))
-        row = int(round(yy / step))
-        col = min(col, size - 1)
-        row = min(row, size - 1)
+        col = min(int(round(xx / step)), size - 1)
+        row = min(int(round(yy / step)), size - 1)
         T_array_full[row, col] = T_data_full[i]
         T_array_p[row, col] = T_data_p[i]
     return field_no_shift, T_array_full, T_array_p
 
-# -----------------------------
-# 6) Main Program: Visualization
-# -----------------------------
 def main():
     logger = setup_logging(os.getcwd())
 
@@ -162,12 +151,13 @@ def main():
     L_temp = 1.0
     size = 512
     offset = 0.0
-    macro_gradient = (1.0, 0.0)
+    macro_gradient = (0.0, 1.0)
     alpha_all = [50, 10, 2, 1, 0, -2]
 
     n_rows = 3
     n_cols = len(alpha_all)
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(3*n_cols, 3*n_rows), squeeze=False)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(3*n_cols, 3*n_rows),
+                             gridspec_kw={'hspace': 0.01, 'wspace': 0.9})
 
     for j, alpha in enumerate(alpha_all):
         _, T_array_full, T_array_p = run_simulation_periodic(
@@ -176,36 +166,36 @@ def main():
             macro_gradient=macro_gradient, offset=offset
         )
 
-        # Row 1: Full temperature field
         ax_full = axes[0, j]
-        im_full = ax_full.imshow(T_array_full, origin='lower', cmap='jet',
-                                 extent=[0, L_temp, 0, L_temp])
-        ax_full.set_title(r"$\alpha = $" + f"{alpha}", fontsize=12)
+        im_full = ax_full.imshow(T_array_full, origin='lower', cmap='jet', extent=[0, L_temp, 0, L_temp])
+        ax_full.set_title(r"$\alpha = $" + f"{alpha}")
         ax_full.set_xlabel("x")
         ax_full.set_ylabel("y")
-        fig.colorbar(im_full, ax=ax_full, fraction=0.046, pad=0.04)
+        cb = fig.colorbar(im_full, ax=ax_full, fraction=0.046, pad=0.02)
+        cb.ax.tick_params(labelsize=10)
+        ax_full.tick_params(labelsize=10)
 
-        # Row 2: Temperature perturbation field T_p
         ax_tp = axes[1, j]
-        im_tp = ax_tp.imshow(T_array_p, origin='lower', cmap='jet',
-                             extent=[0, L_temp, 0, L_temp])
+        im_tp = ax_tp.imshow(T_array_p, origin='lower', cmap='jet', extent=[0, L_temp, 0, L_temp])
         ax_tp.set_xlabel("x")
         ax_tp.set_ylabel("y")
-        fig.colorbar(im_tp, ax=ax_tp, fraction=0.046, pad=0.04)
+        cb = fig.colorbar(im_tp, ax=ax_tp, fraction=0.046, pad=0.02)
+        cb.ax.tick_params(labelsize=10)
+        ax_tp.tick_params(labelsize=10)
 
-        # Row 3: Log power spectrum of T_p
         ps_temp = compute_power_spectrum_2d(T_array_p)
         ax_ps = axes[2, j]
         im_ps = ax_ps.imshow(np.log10(ps_temp + 1e-12), origin='lower', cmap='jet')
-        ax_ps.set_xlabel(r"$kₓ$")
-        ax_ps.set_ylabel(r"$kᵧ$")
-        fig.colorbar(im_ps, ax=ax_ps, fraction=0.046, pad=0.04)
+        ax_ps.set_xlabel(r"$k_x$")
+        ax_ps.set_ylabel(r"$k_y$")
+        cb = fig.colorbar(im_ps, ax=ax_ps, fraction=0.046, pad=0.02)
+        cb.ax.tick_params(labelsize=10)
+        ax_ps.tick_params(labelsize=10)
 
-    plt.tight_layout()
     out_file = f"hyperuniform_clean_Gx{macro_gradient[0]}_Gy{macro_gradient[1]}_alphas.png"
-    plt.savefig(out_file, dpi=150, bbox_inches='tight')
+    plt.savefig(out_file, dpi=300, bbox_inches='tight')
     plt.show()
     logger.info(f"Saved cleaned figure to: {out_file}")
 
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
